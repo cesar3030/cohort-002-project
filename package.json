@@ -8,7 +8,7 @@
     "start": "next start",
     "cherry-pick": "ai-hero-cli cherry-pick --branch=live-run-through",
     "reset": "ai-hero-cli reset --branch=live-run-through",
-    "copy-eng-docs": "npx tsx scripts/copy-eng-docs/copy-eng-docs.ts"
+    "import-eng-docs": "npx tsx scripts/import-eng-docs/import-eng-docs.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.53",

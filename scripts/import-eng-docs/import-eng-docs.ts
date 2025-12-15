@@ -8,7 +8,7 @@ import {
   readFileSync,
   readdirSync,
   statSync,
-  copyFileSync,
+  writeFileSync,
   rmSync,
 } from "fs";
 import { join, relative, basename } from "path";
@@ -16,6 +16,16 @@ import { join, relative, basename } from "path";
 const REPO_URL = "https://github.com/busbud/eng-docs";
 const TEMP_DIR = join(process.cwd(), ".temp-eng-docs");
 const OUTPUT_DIR = join(process.cwd(), "data", "eng-docs");
+const OUTPUT_FILE = join(OUTPUT_DIR, "eng-docs.json");
+
+interface DocEntry {
+  id: string;
+  hash: string;
+  importedAt: string;
+  content: string;
+  team: string;
+  keywords: string[];
+}
 
 /**
  * Converts a string to kebab-case lowercase
@@ -115,62 +125,63 @@ function removeDuplicateParts(parts: string[]): string[] {
 }
 
 /**
- * Finds existing file with the same name pattern (excluding hash)
- * Returns the hash from the existing file if found, null otherwise
+ * Extracts keywords from a path string
+ * Splits by various separators and converts to lowercase words
+ * Removes duplicates and excludes the team name
  */
-function findExistingFileHash(
-  namePartsWithoutHash: string[],
-  outputDir: string
-): string | null {
-  if (!existsSync(outputDir)) {
-    return null;
+function extractKeywords(path: string, teamName: string): string[] {
+  if (!path) {
+    return [];
   }
 
-  const files = readdirSync(outputDir);
-  const namePattern = namePartsWithoutHash.join("_");
+  // Split by common separators: /, \, -, _, spaces
+  const words = path
+    .split(/[/\\\-_\s]+/)
+    .map((word) => word.toLowerCase())
+    .filter((word) => word.length > 0);
 
-  // Look for files matching the pattern: {nameParts}_{hash}.md
-  // where hash is exactly 12 hex characters
-  const expectedPartsCount = namePartsWithoutHash.length + 1; // name parts + hash
+  // Remove team name from keywords
+  const teamNameLower = teamName.toLowerCase();
+  const filteredWords = words.filter((word) => word !== teamNameLower);
 
-  for (const file of files) {
-    if (!file.endsWith(".md")) {
-      continue;
-    }
+  // Remove duplicates
+  const uniqueWords = Array.from(new Set(filteredWords));
 
-    // Remove .md extension
-    const nameWithoutExt = file.slice(0, -3);
+  return uniqueWords;
+}
 
-    // Split by underscore
-    const parts = nameWithoutExt.split("_");
-
-    // Must have exactly: nameParts + hash (1 more part than nameParts)
-    if (parts.length !== expectedPartsCount) {
-      continue;
-    }
-
-    // Check if all parts except the last match our pattern
-    const filePartsWithoutHash = parts.slice(0, -1);
-    const filePattern = filePartsWithoutHash.join("_");
-
-    if (filePattern === namePattern) {
-      // The last part should be the hash
-      const hash = parts[parts.length - 1];
-      // Validate hash format (12 hex characters)
-      if (/^[a-f0-9]{12}$/i.test(hash)) {
-        return hash;
-      }
-    }
+/**
+ * Loads existing entries from JSON file
+ */
+function loadExistingEntries(): DocEntry[] {
+  if (!existsSync(OUTPUT_FILE)) {
+    return [];
   }
 
-  return null;
+  try {
+    const content = readFileSync(OUTPUT_FILE, "utf-8");
+    return JSON.parse(content) as DocEntry[];
+  } catch (error) {
+    console.warn("⚠️  Could not parse existing JSON file, starting fresh");
+    return [];
+  }
+}
+
+/**
+ * Finds existing entry by id
+ */
+function findExistingEntry(
+  entries: DocEntry[],
+  id: string
+): DocEntry | undefined {
+  return entries.find((entry) => entry.id === id);
 }
 
 /**
  * Main function
  */
 function main() {
-  console.log("🚀 Starting eng-docs copy process...");
+  console.log("🚀 Starting eng-docs import process...");
 
   try {
     // Clean up temp directory if it exists
@@ -190,6 +201,13 @@ function main() {
       mkdirSync(OUTPUT_DIR, { recursive: true });
     }
 
+    // Load existing entries
+    const existingEntries = loadExistingEntries();
+    const entriesMap = new Map<string, DocEntry>();
+    existingEntries.forEach((entry) => {
+      entriesMap.set(entry.id, entry);
+    });
+
     // Find all markdown files
     console.log("🔍 Finding markdown files...");
     const markdownFiles = findMarkdownFiles(TEMP_DIR, TEMP_DIR);
@@ -200,10 +218,12 @@ function main() {
     let skippedCount = 0;
     let replacedCount = 0;
     let addedCount = 0;
+    const importedAt = new Date().toISOString();
 
     for (const filePath of markdownFiles) {
-      const content = readFileSync(filePath);
-      const hash = calculateHash(content);
+      const contentBuffer = readFileSync(filePath);
+      const content = contentBuffer.toString("utf-8");
+      const hash = calculateHash(contentBuffer);
       const { teamName, pathPrefix } = extractTeamNameAndPathPrefix(
         filePath,
         TEMP_DIR
@@ -213,7 +233,7 @@ function main() {
       // Convert team name to kebab-case
       const kebabTeamName = toKebabCase(teamName);
 
-      // Build filename parts array (hash will be added at the end)
+      // Build filename parts array (for id, without hash)
       const filenameParts: string[] = [];
       if (kebabTeamName) {
         filenameParts.push(kebabTeamName);
@@ -239,53 +259,64 @@ function main() {
       // Remove duplicate parts (keeping first occurrence)
       const uniqueParts = removeDuplicateParts(filenameParts);
 
-      // Check if file with same name pattern already exists
-      const existingHash = findExistingFileHash(uniqueParts, OUTPUT_DIR);
+      // Build id (file path without .md and without hash)
+      const id = uniqueParts.join("_");
 
-      if (existingHash !== null) {
-        if (existingHash === hash) {
-          // File exists with same hash, skip it
+      // Check if entry with same id already exists
+      const existingEntry = entriesMap.get(id);
+
+      if (existingEntry) {
+        if (existingEntry.hash === hash) {
+          // Entry exists with same hash, skip it
           skippedCount++;
           console.log(
             `⏭️  Skipped (same hash): ${relative(TEMP_DIR, filePath)}`
           );
           continue;
         } else {
-          // File exists with different hash, replace it
-          const oldFileName = `${uniqueParts.join("_")}_${existingHash}.md`;
-          const oldFilePath = join(OUTPUT_DIR, oldFileName);
-          if (existsSync(oldFilePath)) {
-            rmSync(oldFilePath);
-          }
+          // Entry exists with different hash, replace it
           replacedCount++;
         }
       } else {
         addedCount++;
       }
 
-      // Add hash as the last part
-      uniqueParts.push(hash);
+      // Build keywords from the path (pathPrefix + originalName, excluding team)
+      const fullPath = [pathPrefix, originalName]
+        .filter(Boolean)
+        .join("/");
+      const keywords = extractKeywords(fullPath, teamName);
 
-      // Build new filename
-      const newFileName = `${uniqueParts.join("_")}.md`;
+      // Create new entry
+      const entry: DocEntry = {
+        id,
+        hash,
+        importedAt,
+        content,
+        team: teamName || "",
+        keywords,
+      };
 
-      const outputPath = join(OUTPUT_DIR, newFileName);
-
-      // Copy file with new name
-      copyFileSync(filePath, outputPath);
+      // Update or add entry
+      entriesMap.set(id, entry);
       processedCount++;
 
-      const action = existingHash !== null ? "Replaced" : "Added";
+      const action = existingEntry ? "Replaced" : "Added";
       console.log(
-        `✅ ${action}: ${relative(TEMP_DIR, filePath)} -> ${newFileName}`
+        `✅ ${action}: ${relative(TEMP_DIR, filePath)} -> ${id}`
       );
     }
+
+    // Convert map to array and write JSON file
+    const allEntries = Array.from(entriesMap.values());
+    writeFileSync(OUTPUT_FILE, JSON.stringify(allEntries, null, 2), "utf-8");
 
     console.log(`\n✨ Successfully processed ${processedCount} files`);
     console.log(`   📥 Added: ${addedCount}`);
     console.log(`   🔄 Replaced: ${replacedCount}`);
     console.log(`   ⏭️  Skipped: ${skippedCount}`);
-    console.log(`📁 Output directory: ${OUTPUT_DIR}`);
+    console.log(`📁 Output file: ${OUTPUT_FILE}`);
+    console.log(`📊 Total entries: ${allEntries.length}`);
 
     // Clean up temp directory
     console.log("🧹 Cleaning up temp directory...");
