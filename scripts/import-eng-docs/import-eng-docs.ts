@@ -25,6 +25,7 @@ interface DocEntry {
   content: string;
   team: string;
   keywords: string[];
+  filename: string;
 }
 
 /**
@@ -229,6 +230,7 @@ function main() {
         TEMP_DIR
       );
       const originalName = basename(filePath, ".md");
+      const rawFilename = basename(filePath);
 
       // Convert team name to kebab-case
       const kebabTeamName = toKebabCase(teamName);
@@ -295,6 +297,7 @@ function main() {
         content,
         team: teamName || "",
         keywords,
+        filename: rawFilename,
       };
 
       // Update or add entry

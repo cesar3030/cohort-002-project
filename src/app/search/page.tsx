@@ -8,27 +8,27 @@ import path from "path";
 import { loadChats, loadMemories } from "@/lib/persistence-layer";
 import { CHAT_LIMIT } from "../page";
 import { SideBar } from "@/components/side-bar";
+import { EngDocList, type EngDocDisplay } from "./docs-list";
 
-interface Email {
+interface EngDoc {
   id: string;
-  threadId: string;
-  from: string;
-  to: string | string[];
-  cc?: string[];
-  subject: string;
-  body: string;
-  timestamp: string;
-  inReplyTo?: string;
-  references?: string[];
-  labels?: string[];
-  arcId?: string;
-  phaseId?: number;
+  hash: string;
+  importedAt: string;
+  content: string;
+  team: string;
+  keywords: string[];
+  filename: string;
 }
 
-async function loadEmails(): Promise<Email[]> {
-  const filePath = path.join(process.cwd(), "data", "emails.json");
+async function loadDocs(): Promise<EngDoc[]> {
+  const filePath = path.join(
+    process.cwd(),
+    "data",
+    "eng-docs",
+    "eng-docs.json"
+  );
   const fileContent = await fs.readFile(filePath, "utf-8");
-  return JSON.parse(fileContent);
+  return JSON.parse(fileContent) as EngDoc[];
 }
 
 export default async function SearchPage(props: {
@@ -39,36 +39,33 @@ export default async function SearchPage(props: {
   const page = Number(searchParams.page) || 1;
   const perPage = Number(searchParams.perPage) || 10;
 
-  const allEmails = await loadEmails();
+  const allDocs = await loadDocs();
 
   // Transform emails to match the expected format
-  const transformedEmails = allEmails
-    .map((email) => ({
-      id: email.id,
-      from: email.from,
-      subject: email.subject,
-      preview: email.body.substring(0, 100) + "...",
-      content: email.body,
-      date: email.timestamp,
+  const transformedDocs = allDocs
+    .map((doc) => ({
+      id: doc.id,
+      team: doc.team,
+      preview: doc.content.substring(0, 100) + "...",
+      content: doc.content,
+      importedAt: doc.importedAt,
+      filename: doc.filename,
     }))
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .sort(
+      (a, b) =>
+        new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime()
+    );
 
   // Filter emails based on search query
-  const filteredEmails = query
-    ? transformedEmails.filter(
-        (email) =>
-          email.subject.toLowerCase().includes(query.toLowerCase()) ||
-          email.from.toLowerCase().includes(query.toLowerCase()) ||
-          email.content.toLowerCase().includes(query.toLowerCase())
+  const filteredDocs = query
+    ? transformedDocs.filter((doc) =>
+        doc.content.toLowerCase().includes(query.toLowerCase())
       )
-    : transformedEmails;
+    : transformedDocs;
 
-  const totalPages = Math.ceil(filteredEmails.length / perPage);
+  const totalPages = Math.ceil(filteredDocs.length / perPage);
   const startIndex = (page - 1) * perPage;
-  const paginatedEmails = filteredEmails.slice(
-    startIndex,
-    startIndex + perPage
-  );
+  const paginatedDocs = filteredDocs.slice(startIndex, startIndex + perPage);
   const allChats = await loadChats();
   const chats = allChats.slice(0, CHAT_LIMIT);
   const memories = await loadMemories();
@@ -96,17 +93,17 @@ export default async function SearchPage(props: {
                 <p className="text-sm text-muted-foreground">
                   {query ? (
                     <>
-                      Found {filteredEmails.length} result
-                      {filteredEmails.length !== 1 ? "s" : ""} for &ldquo;
+                      Found {filteredDocs.length} result
+                      {filteredDocs.length !== 1 ? "s" : ""} for &ldquo;
                       {query}
                       &rdquo;
                     </>
                   ) : (
-                    <>Found {filteredEmails.length} emails</>
+                    <>Found {filteredDocs.length} emails</>
                   )}
                 </p>
               </div>
-              <EmailList emails={paginatedEmails} />
+              <EngDocList engDocs={paginatedDocs as EngDocDisplay[]} />
               {totalPages > 1 && (
                 <div className="mt-6">
                   <SearchPagination
