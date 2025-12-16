@@ -1,8 +1,6 @@
 import BM25 from "okapibm25";
-import fs from "fs/promises";
-import path from "path";
 
-interface EngDoc {
+export interface EngDoc {
   id: string;
   hash: string;
   importedAt: string;
@@ -10,17 +8,7 @@ interface EngDoc {
   team: string;
   keywords: string[];
   filename: string;
-}
-
-export async function loadDocs(): Promise<EngDoc[]> {
-  const filePath = path.join(
-    process.cwd(),
-    "data",
-    "eng-docs",
-    "eng-docs.json"
-  );
-  const fileContent = await fs.readFile(filePath, "utf-8");
-  return JSON.parse(fileContent) as EngDoc[];
+  embedding: number[];
 }
 
 export function searchWithBM25(

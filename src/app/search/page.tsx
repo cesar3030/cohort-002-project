@@ -7,7 +7,8 @@ import { loadChats, loadMemories } from "@/lib/persistence-layer";
 import { CHAT_LIMIT } from "../page";
 import { SideBar } from "@/components/side-bar";
 import { EngDocList, type EngDocDisplay } from "./docs-list";
-import { loadDocs, searchWithBM25 } from "../search";
+import { searchWithBM25 } from "../lib/search-bm25";
+import { loadDocs } from "../lib/repository";
 
 export default async function SearchPage(props: {
   searchParams: Promise<{ q?: string; page?: string; perPage?: string }>;
