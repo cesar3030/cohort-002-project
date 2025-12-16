@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 
+// Load environment variables from .env.local
+import { config } from "dotenv";
+import { resolve } from "path";
+config({ path: resolve(process.cwd(), ".env.local") });
+
 import { execSync } from "child_process";
 import { createHash } from "crypto";
 import {
@@ -12,6 +17,8 @@ import {
   rmSync,
 } from "fs";
 import { join, relative, basename } from "path";
+import { embedMany } from "ai";
+import { google } from "@ai-sdk/google";
 
 const REPO_URL = "https://github.com/busbud/eng-docs";
 const TEMP_DIR = join(process.cwd(), ".temp-eng-docs");
@@ -26,7 +33,10 @@ interface DocEntry {
   team: string;
   keywords: string[];
   filename: string;
+  embedding: number[];
 }
+
+const EMBEDDING_MODEL = "text-embedding-004";
 
 /**
  * Converts a string to kebab-case lowercase
@@ -161,7 +171,12 @@ function loadExistingEntries(): DocEntry[] {
 
   try {
     const content = readFileSync(OUTPUT_FILE, "utf-8");
-    return JSON.parse(content) as DocEntry[];
+    const entries = JSON.parse(content) as DocEntry[];
+    // Ensure all entries have embedding property (for backwards compatibility)
+    return entries.map((entry) => ({
+      ...entry,
+      embedding: entry.embedding || [],
+    }));
   } catch (error) {
     console.warn("⚠️  Could not parse existing JSON file, starting fresh");
     return [];
@@ -181,7 +196,7 @@ function findExistingEntry(
 /**
  * Main function
  */
-function main() {
+async function main() {
   console.log("🚀 Starting eng-docs import process...");
 
   try {
@@ -267,29 +282,27 @@ function main() {
       // Check if entry with same id already exists
       const existingEntry = entriesMap.get(id);
 
+      // Build keywords from the path (pathPrefix + originalName, excluding team)
+      const fullPath = [pathPrefix, originalName].filter(Boolean).join("/");
+      const keywords = extractKeywords(fullPath, teamName);
+
       if (existingEntry) {
         if (existingEntry.hash === hash) {
-          // Entry exists with same hash, skip it
+          // Entry exists with same hash, preserve existing embedding and skip processing
           skippedCount++;
           console.log(
             `⏭️  Skipped (same hash): ${relative(TEMP_DIR, filePath)}`
           );
           continue;
         } else {
-          // Entry exists with different hash, replace it
+          // Entry exists with different hash, replace it (will need new embedding)
           replacedCount++;
         }
       } else {
         addedCount++;
       }
 
-      // Build keywords from the path (pathPrefix + originalName, excluding team)
-      const fullPath = [pathPrefix, originalName]
-        .filter(Boolean)
-        .join("/");
-      const keywords = extractKeywords(fullPath, teamName);
-
-      // Create new entry
+      // Create new entry (embedding will be added later if needed)
       const entry: DocEntry = {
         id,
         hash,
@@ -298,6 +311,7 @@ function main() {
         team: teamName || "",
         keywords,
         filename: rawFilename,
+        embedding: [], // Will be populated after embedding generation
       };
 
       // Update or add entry
@@ -305,21 +319,90 @@ function main() {
       processedCount++;
 
       const action = existingEntry ? "Replaced" : "Added";
-      console.log(
-        `✅ ${action}: ${relative(TEMP_DIR, filePath)} -> ${id}`
-      );
+      console.log(`✅ ${action}: ${relative(TEMP_DIR, filePath)} -> ${id}`);
     }
 
-    // Convert map to array and write JSON file
-    const allEntries = Array.from(entriesMap.values());
-    writeFileSync(OUTPUT_FILE, JSON.stringify(allEntries, null, 2), "utf-8");
+    // Generate embeddings only for entries that changed (different hash) or are new
+    console.log("\n🧮 Generating embeddings...");
+    const allEntriesArray = Array.from(entriesMap.values());
+
+    // Filter entries that need embeddings (empty array means hash changed or new entry)
+    // Entries with same hash preserve their existing embeddings and are skipped here
+    const entriesNeedingEmbeddings = allEntriesArray.filter(
+      (entry) => !entry.embedding || entry.embedding.length === 0
+    );
+
+    if (entriesNeedingEmbeddings.length > 0) {
+      const embeddingModel = google.textEmbeddingModel(EMBEDDING_MODEL);
+      const BATCH_SIZE = 100;
+      const totalBatches = Math.ceil(
+        entriesNeedingEmbeddings.length / BATCH_SIZE
+      );
+
+      try {
+        console.log(
+          `📝 Generating embeddings for ${entriesNeedingEmbeddings.length} entries in ${totalBatches} batch(es)...`
+        );
+
+        // Process embeddings in batches
+        for (let i = 0; i < entriesNeedingEmbeddings.length; i += BATCH_SIZE) {
+          const batch = entriesNeedingEmbeddings.slice(i, i + BATCH_SIZE);
+          const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+          const textsToEmbed = batch.map((entry) => entry.content);
+
+          console.log(
+            `  Processing batch ${batchNumber}/${totalBatches} (${batch.length} entries)...`
+          );
+
+          const { embeddings, usage } = await embedMany({
+            model: embeddingModel,
+            values: textsToEmbed,
+            maxRetries: 0,
+          });
+
+          // eslint-disable-next-line no-console
+          console.log(`  💸 Usage => `, JSON.stringify(usage, null, 2), "\n");
+          // Don't make the call for testing
+          // const embeddings = batch.map(() => [1, 2, 3, 4, 5]);
+
+          // Assign embeddings to entries in this batch
+          batch.forEach((entry, index) => {
+            entry.embedding = embeddings[index] || [];
+          });
+
+          console.log(
+            `  ✅ Batch ${batchNumber}/${totalBatches} complete (${embeddings.length} embeddings)`
+          );
+        }
+
+        console.log(
+          `✅ Generated ${entriesNeedingEmbeddings.length} embeddings total`
+        );
+      } catch (error) {
+        console.error("❌ Error generating embeddings:", error);
+        console.warn("⚠️  Continuing without embeddings...");
+        // Set empty arrays for entries that failed to get embeddings
+        entriesNeedingEmbeddings.forEach((entry) => {
+          entry.embedding = [];
+        });
+      }
+    } else {
+      console.log("✅ All entries already have embeddings");
+    }
+
+    // Write JSON file (allEntriesArray already contains updated entries with embeddings)
+    writeFileSync(
+      OUTPUT_FILE,
+      JSON.stringify(allEntriesArray, null, 2),
+      "utf-8"
+    );
 
     console.log(`\n✨ Successfully processed ${processedCount} files`);
     console.log(`   📥 Added: ${addedCount}`);
     console.log(`   🔄 Replaced: ${replacedCount}`);
     console.log(`   ⏭️  Skipped: ${skippedCount}`);
     console.log(`📁 Output file: ${OUTPUT_FILE}`);
-    console.log(`📊 Total entries: ${allEntries.length}`);
+    console.log(`📊 Total entries: ${allEntriesArray.length}`);
 
     // Clean up temp directory
     console.log("🧹 Cleaning up temp directory...");
@@ -332,5 +415,7 @@ function main() {
   }
 }
 
-main();
-
+main().catch((error) => {
+  console.error("❌ Fatal error:", error);
+  process.exit(1);
+});

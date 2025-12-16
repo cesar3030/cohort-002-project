@@ -132,6 +132,9 @@ importers:
       ai-hero-cli:
         specifier: ^0.2.12
         version: 0.2.12
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.6.1
       evalite:
         specifier: 1.0.0-beta.15
         version: 1.0.0-beta.15(ai@5.0.108(zod@4.1.12))(better-sqlite3@11.10.0)
