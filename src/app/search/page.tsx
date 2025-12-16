@@ -8,7 +8,8 @@ import { CHAT_LIMIT } from "../page";
 import { SideBar } from "@/components/side-bar";
 import { EngDocList, type EngDocDisplay } from "./docs-list";
 import { searchWithBM25 } from "../lib/search-bm25";
-import { loadDocs } from "../lib/repository";
+import { loadDocs } from "../lib/eng-doc-repository";
+import { searchWithEmbeddings } from "../lib/search-embbedings";
 
 export default async function SearchPage(props: {
   searchParams: Promise<{ q?: string; page?: string; perPage?: string }>;
@@ -19,11 +20,14 @@ export default async function SearchPage(props: {
   const perPage = Number(searchParams.perPage) || 10;
 
   const allDocs = await loadDocs();
-  // Transform emails to match the expected format
-  // eslint-disable-next-line no-console
-  const queryArr = query ? query.split(" ") : [];
+
   // Filter emails based on search query
-  const filteredDocs = searchWithBM25(allDocs, queryArr);
+  // const filteredDocs = searchWithBM25(allDocs, query);
+
+  const filteredDocs = await searchWithEmbeddings(allDocs, query);
+
+  // eslint-disable-next-line no-console
+  // console.log(`\n\nfilteredDocs => `, filteredDocs.splice(0, 4));
   const transformedDocs = filteredDocs
     .map(({ score, doc }) => ({
       id: doc.id,
@@ -34,7 +38,7 @@ export default async function SearchPage(props: {
       filename: doc.filename,
       score,
     }))
-    .filter(({ score }) => score > 3.5 || score === -1);
+    .filter(({ score }) => score > 0.2 || score === -1);
 
   const totalPages = Math.ceil(transformedDocs.length / perPage);
   const startIndex = (page - 1) * perPage;

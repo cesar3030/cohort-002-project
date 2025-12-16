@@ -1,23 +1,14 @@
 import BM25 from "okapibm25";
-
-export interface EngDoc {
-  id: string;
-  hash: string;
-  importedAt: string;
-  content: string;
-  team: string;
-  keywords: string[];
-  filename: string;
-  embedding: number[];
-}
+import { EngDoc } from "./eng-doc-repository";
 
 export function searchWithBM25(
   docs: EngDoc[],
-  keywords: string[]
+  query: string
 ): {
   score: number;
   doc: EngDoc;
 }[] {
+  const keywords = query.length > 0 ? query.split(" ") : [];
   if (keywords.length === 0) {
     return docs.map((doc) => ({
       doc,

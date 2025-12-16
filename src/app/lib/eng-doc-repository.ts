@@ -1,6 +1,16 @@
 import fs from "fs/promises";
 import path from "path";
-import { EngDoc } from "./search-bm25";
+
+export interface EngDoc {
+  id: string;
+  hash: string;
+  importedAt: string;
+  content: string;
+  team: string;
+  keywords: string[];
+  filename: string;
+  embedding: number[];
+}
 
 export async function loadDocs(): Promise<EngDoc[]> {
   const filePath = path.join(

@@ -36,8 +36,6 @@ interface DocEntry {
   embedding: number[];
 }
 
-const EMBEDDING_MODEL = "text-embedding-004";
-
 /**
  * Converts a string to kebab-case lowercase
  */
@@ -333,7 +331,9 @@ async function main() {
     );
 
     if (entriesNeedingEmbeddings.length > 0) {
-      const embeddingModel = google.textEmbeddingModel(EMBEDDING_MODEL);
+      const embeddingModel = google.textEmbeddingModel(
+        process.env.GOOGLE_EMBEDDING_MODEL!
+      );
       const BATCH_SIZE = 100;
       const totalBatches = Math.ceil(
         entriesNeedingEmbeddings.length / BATCH_SIZE
