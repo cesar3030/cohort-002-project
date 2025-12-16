@@ -12,6 +12,7 @@ export type EngDocDisplay = {
   content: string;
   importedAt: string;
   filename: string;
+  score: number;
 };
 
 function EngDocCard({ engDoc }: { engDoc: EngDocDisplay }) {
@@ -41,6 +42,9 @@ function EngDocCard({ engDoc }: { engDoc: EngDocDisplay }) {
                 {engDoc.filename}
               </h3>
               <p className="text-xs text-muted-foreground">{engDoc.team}</p>
+              <p className="text-xs text-muted-foreground">
+                Score: {engDoc.score.toFixed(2)}
+              </p>
             </div>
             <span className="text-xs text-muted-foreground whitespace-nowrap">
               {formatDate(engDoc.importedAt)}

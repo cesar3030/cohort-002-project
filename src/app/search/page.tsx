@@ -1,35 +1,13 @@
 import { TopBar } from "@/components/top-bar";
 import { SearchInput } from "./search-input";
-import { EmailList } from "./email-list";
 import { SearchPagination } from "./search-pagination";
 import { PerPageSelector } from "./per-page-selector";
-import fs from "fs/promises";
-import path from "path";
+
 import { loadChats, loadMemories } from "@/lib/persistence-layer";
 import { CHAT_LIMIT } from "../page";
 import { SideBar } from "@/components/side-bar";
 import { EngDocList, type EngDocDisplay } from "./docs-list";
-
-interface EngDoc {
-  id: string;
-  hash: string;
-  importedAt: string;
-  content: string;
-  team: string;
-  keywords: string[];
-  filename: string;
-}
-
-async function loadDocs(): Promise<EngDoc[]> {
-  const filePath = path.join(
-    process.cwd(),
-    "data",
-    "eng-docs",
-    "eng-docs.json"
-  );
-  const fileContent = await fs.readFile(filePath, "utf-8");
-  return JSON.parse(fileContent) as EngDoc[];
-}
+import { loadDocs, searchWithBM25 } from "../search";
 
 export default async function SearchPage(props: {
   searchParams: Promise<{ q?: string; page?: string; perPage?: string }>;
@@ -40,32 +18,26 @@ export default async function SearchPage(props: {
   const perPage = Number(searchParams.perPage) || 10;
 
   const allDocs = await loadDocs();
-
   // Transform emails to match the expected format
-  const transformedDocs = allDocs
-    .map((doc) => ({
+  // eslint-disable-next-line no-console
+  const queryArr = query ? query.split(" ") : [];
+  // Filter emails based on search query
+  const filteredDocs = searchWithBM25(allDocs, queryArr);
+  const transformedDocs = filteredDocs
+    .map(({ score, doc }) => ({
       id: doc.id,
       team: doc.team,
       preview: doc.content.substring(0, 100) + "...",
       content: doc.content,
       importedAt: doc.importedAt,
       filename: doc.filename,
+      score,
     }))
-    .sort(
-      (a, b) =>
-        new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime()
-    );
+    .filter(({ score }) => score > 3.5 || score === -1);
 
-  // Filter emails based on search query
-  const filteredDocs = query
-    ? transformedDocs.filter((doc) =>
-        doc.content.toLowerCase().includes(query.toLowerCase())
-      )
-    : transformedDocs;
-
-  const totalPages = Math.ceil(filteredDocs.length / perPage);
+  const totalPages = Math.ceil(transformedDocs.length / perPage);
   const startIndex = (page - 1) * perPage;
-  const paginatedDocs = filteredDocs.slice(startIndex, startIndex + perPage);
+  const paginatedDocs = transformedDocs.slice(startIndex, startIndex + perPage);
   const allChats = await loadChats();
   const chats = allChats.slice(0, CHAT_LIMIT);
   const memories = await loadMemories();
@@ -103,7 +75,7 @@ export default async function SearchPage(props: {
                   )}
                 </p>
               </div>
-              <EngDocList engDocs={paginatedDocs as EngDocDisplay[]} />
+              <EngDocList engDocs={paginatedDocs} />
               {totalPages > 1 && (
                 <div className="mt-6">
                   <SearchPagination
