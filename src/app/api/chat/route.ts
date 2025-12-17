@@ -93,15 +93,29 @@ export async function POST(req: Request) {
       }
 
       const result = streamText({
-        model: google("gemini-2.5-flash"),
+        model: google("gemini-2.5-flash-lite"),
         messages: convertToModelMessages(messages),
         system: `
-        Only use the search tool to answer the prompt. Do not use other sources than the provider search tool
-        `,
+          <task-context>
+          You are a documentation assistant that helps users find and understand information a base of knowledge specific to the Budbud company.
+          </task-context>
+
+          <rules>
+          - You MUST use the search tool for ANY question about teams, code issues, code styles, work process, or specific information
+          - NEVER answer from your training data - always search the actual database documents first
+          - If the first search doesn't find enough information, try different keywords or search queries
+          - Use both semantic (searchQuery) and keyword (keywords) search parameters together for best results
+          - Only after searching should you formulate your answer based on the search results
+          </rules>
+
+          <the-ask>
+          Here is the user's question. Search within the documentation first, then provide your answer based on what you find.
+          </the-ask>
+          `,
         tools: {
           search: searchTool,
         },
-        stopWhen: [stepCountIs(10)],
+        stopWhen: [stepCountIs(5)],
       });
 
       writer.merge(
