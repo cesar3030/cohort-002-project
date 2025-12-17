@@ -10,6 +10,7 @@ import { EngDocList, type EngDocDisplay } from "./docs-list";
 import { searchWithBM25 } from "../lib/search-bm25";
 import { loadDocs } from "../lib/eng-doc-repository";
 import { searchWithEmbeddings } from "../lib/search-embbedings";
+import { searchWithRRF } from "../lib/search-rrf";
 
 export default async function SearchPage(props: {
   searchParams: Promise<{ q?: string; page?: string; perPage?: string }>;
@@ -22,9 +23,9 @@ export default async function SearchPage(props: {
   const allDocs = await loadDocs();
 
   // Filter emails based on search query
-  // const filteredDocs = searchWithBM25(allDocs, query);
 
-  const filteredDocs = await searchWithEmbeddings(allDocs, query);
+  const keywords = query.length > 0 ? query.split(" ") : undefined; // should generate a list of keyword from an llm call
+  const filteredDocs = await searchWithRRF(allDocs, query, keywords);
 
   // eslint-disable-next-line no-console
   // console.log(`\n\nfilteredDocs => `, filteredDocs.splice(0, 4));

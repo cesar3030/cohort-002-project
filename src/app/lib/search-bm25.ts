@@ -3,12 +3,11 @@ import { EngDoc } from "./eng-doc-repository";
 
 export function searchWithBM25(
   docs: EngDoc[],
-  query: string
+  keywords: string[]
 ): {
   score: number;
   doc: EngDoc;
 }[] {
-  const keywords = query.length > 0 ? query.split(" ") : [];
   if (keywords.length === 0) {
     return docs.map((doc) => ({
       doc,

@@ -7,17 +7,26 @@ const RRF_K = 60;
 
 export async function searchWithRRF(
   docs: EngDoc[],
-  query: string
+  query?: string,
+  keywords?: string[]
 ): Promise<
   {
     score: number;
     doc: EngDoc;
   }[]
 > {
-  const bm25Results = searchWithBM25(docs, query);
-  const embeddingsResults = await searchWithEmbeddings(docs, query);
+  const bm25Results =
+    keywords && keywords.length > 0 ? searchWithBM25(docs, keywords) : [];
+  const embeddingsResults = query
+    ? await searchWithEmbeddings(docs, query)
+    : [];
 
-  return reciprocalRankFusion([bm25Results, embeddingsResults]);
+  return reciprocalRankFusion([
+    bm25Results.slice(0, 30),
+    embeddingsResults.slice(0, 30),
+  ])
+    .filter((r) => r.score > 0)
+    .slice(0, 10);
 }
 
 // ADDED: Combines multiple ranking lists using position-based scoring
