@@ -9,9 +9,11 @@ export type EngDocDisplay = {
   id: string;
   team: string;
   preview: string;
-  content: string;
+  chunk: string;
   importedAt: string;
   filename: string;
+  chunkIndex: number;
+  totalChunks: number;
   score: number;
 };
 
@@ -39,7 +41,8 @@ function EngDocCard({ engDoc }: { engDoc: EngDocDisplay }) {
           <div className="flex items-start justify-between gap-4 mb-1">
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold text-base mb-0.5">
-                {engDoc.filename}
+                {engDoc.filename} (chunk {engDoc.chunkIndex + 1} of{" "}
+                {engDoc.totalChunks})
               </h3>
               <p className="text-xs text-muted-foreground">{engDoc.team}</p>
               <p className="text-xs text-muted-foreground">
@@ -59,7 +62,7 @@ function EngDocCard({ engDoc }: { engDoc: EngDocDisplay }) {
             <div className="mt-3 pt-3 border-t">
               <div className="prose prose-sm max-w-none dark:prose-invert">
                 <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                  {engDoc.content}
+                  {engDoc.chunk}
                 </pre>
               </div>
             </div>
@@ -94,7 +97,7 @@ export function EngDocList({ engDocs }: { engDocs: EngDocDisplay[] }) {
     return (
       <div className="text-center py-12">
         <MailIcon className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-        <h3 className="text-lg font-semibold mb-2">No emails found</h3>
+        <h3 className="text-lg font-semibold mb-2">No document found</h3>
         <p className="text-muted-foreground">Try adjusting your search query</p>
       </div>
     );

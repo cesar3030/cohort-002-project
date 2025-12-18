@@ -5,6 +5,8 @@ import { config } from "dotenv";
 import { resolve } from "path";
 config({ path: resolve(process.cwd(), ".env.local") });
 
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
+
 import { execSync } from "child_process";
 import { createHash } from "crypto";
 import {
@@ -25,11 +27,13 @@ const TEMP_DIR = join(process.cwd(), ".temp-eng-docs");
 const OUTPUT_DIR = join(process.cwd(), "data", "eng-docs");
 const OUTPUT_FILE = join(OUTPUT_DIR, "eng-docs.json");
 
-interface DocEntry {
+interface DocEntryChunk {
+  chunk: string;
+  chunkIndex: number;
+  totalChunks: number;
   id: string;
   hash: string;
   importedAt: string;
-  content: string;
   team: string;
   keywords: string[];
   filename: string;
@@ -52,7 +56,7 @@ function toKebabCase(str: string): string {
 /**
  * Calculates SHA-256 hash of file content
  */
-function calculateHash(content: Buffer): string {
+function calculateHash(content: string): string {
   return createHash("sha256").update(content).digest("hex").substring(0, 12);
 }
 
@@ -162,14 +166,14 @@ function extractKeywords(path: string, teamName: string): string[] {
 /**
  * Loads existing entries from JSON file
  */
-function loadExistingEntries(): DocEntry[] {
+function loadExistingEntries(): DocEntryChunk[] {
   if (!existsSync(OUTPUT_FILE)) {
     return [];
   }
 
   try {
     const content = readFileSync(OUTPUT_FILE, "utf-8");
-    const entries = JSON.parse(content) as DocEntry[];
+    const entries = JSON.parse(content) as DocEntryChunk[];
     // Ensure all entries have embedding property (for backwards compatibility)
     return entries.map((entry) => ({
       ...entry,
@@ -185,9 +189,9 @@ function loadExistingEntries(): DocEntry[] {
  * Finds existing entry by id
  */
 function findExistingEntry(
-  entries: DocEntry[],
+  entries: DocEntryChunk[],
   id: string
-): DocEntry | undefined {
+): DocEntryChunk | undefined {
   return entries.find((entry) => entry.id === id);
 }
 
@@ -217,7 +221,7 @@ async function main() {
 
     // Load existing entries
     const existingEntries = loadExistingEntries();
-    const entriesMap = new Map<string, DocEntry>();
+    const entriesMap = new Map<string, DocEntryChunk>();
     existingEntries.forEach((entry) => {
       entriesMap.set(entry.id, entry);
     });
@@ -237,19 +241,35 @@ async function main() {
     for (const filePath of markdownFiles) {
       const contentBuffer = readFileSync(filePath);
       const content = contentBuffer.toString("utf-8");
-      const hash = calculateHash(contentBuffer);
+
+      const textSplitter = new RecursiveCharacterTextSplitter({
+        chunkSize: 1000,
+        chunkOverlap: 100,
+        separators: [
+          "\n## ",
+          "\n### ",
+          "\n#### ",
+          "\n##### ",
+          "\n###### ",
+          "\n\n",
+          "\n",
+          " ",
+          "",
+        ],
+      });
+      const contentChunks = await textSplitter.splitText(content);
+
       const { teamName, pathPrefix } = extractTeamNameAndPathPrefix(
         filePath,
         TEMP_DIR
       );
+      // Build filename parts array (for id, without hash)
+
+      const filenameParts: string[] = [];
       const originalName = basename(filePath, ".md");
       const rawFilename = basename(filePath);
-
       // Convert team name to kebab-case
       const kebabTeamName = toKebabCase(teamName);
-
-      // Build filename parts array (for id, without hash)
-      const filenameParts: string[] = [];
       if (kebabTeamName) {
         filenameParts.push(kebabTeamName);
       }
@@ -271,53 +291,64 @@ async function main() {
         filenameParts.push(kebabOriginalName);
       }
 
-      // Remove duplicate parts (keeping first occurrence)
-      const uniqueParts = removeDuplicateParts(filenameParts);
-
-      // Build id (file path without .md and without hash)
-      const id = uniqueParts.join("_");
-
-      // Check if entry with same id already exists
-      const existingEntry = entriesMap.get(id);
-
       // Build keywords from the path (pathPrefix + originalName, excluding team)
       const fullPath = [pathPrefix, originalName].filter(Boolean).join("/");
       const keywords = extractKeywords(fullPath, teamName);
 
-      if (existingEntry) {
-        if (existingEntry.hash === hash) {
-          // Entry exists with same hash, preserve existing embedding and skip processing
-          skippedCount++;
-          console.log(
-            `⏭️  Skipped (same hash): ${relative(TEMP_DIR, filePath)}`
-          );
-          continue;
+      // Remove duplicate parts (keeping first occurrence)
+      const uniqueParts = removeDuplicateParts(filenameParts);
+
+      const totalChunks = contentChunks.length;
+
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        const chunk = contentChunks[chunkIndex];
+        const hash = calculateHash(chunk);
+
+        // Build id (file path without .md and without hash)
+        const chunkId = [...uniqueParts, chunkIndex].join("_");
+
+        // Check if entry with same id already exists
+        const existingEntry = entriesMap.get(chunkId);
+
+        if (existingEntry) {
+          if (existingEntry.hash === hash) {
+            // Entry exists with same hash, preserve existing embedding and skip processing
+            skippedCount++;
+            console.log(
+              `⏭️  Skipped (same hash) chunk ${chunkIndex + 1} of ${totalChunks}: ${relative(TEMP_DIR, filePath)}`
+            );
+            continue;
+          } else {
+            // Entry exists with different hash, replace it (will need new embedding)
+            replacedCount++;
+          }
         } else {
-          // Entry exists with different hash, replace it (will need new embedding)
-          replacedCount++;
+          addedCount++;
         }
-      } else {
-        addedCount++;
+
+        // Create new entry (embedding will be added later if needed)
+        const entry: DocEntryChunk = {
+          id: chunkId,
+          hash,
+          importedAt,
+          chunk,
+          chunkIndex,
+          totalChunks,
+          team: teamName || "",
+          keywords,
+          filename: rawFilename,
+          embedding: [], // Will be populated after embedding generation
+        };
+
+        // Update or add entry
+        entriesMap.set(chunkId, entry);
+        processedCount++;
+
+        const action = existingEntry ? "Replaced" : "Added";
+        console.log(
+          `✅ ${action}: ${relative(TEMP_DIR, filePath)} (chunk ${chunkIndex + 1} of ${totalChunks}) -> ${chunkId}`
+        );
       }
-
-      // Create new entry (embedding will be added later if needed)
-      const entry: DocEntry = {
-        id,
-        hash,
-        importedAt,
-        content,
-        team: teamName || "",
-        keywords,
-        filename: rawFilename,
-        embedding: [], // Will be populated after embedding generation
-      };
-
-      // Update or add entry
-      entriesMap.set(id, entry);
-      processedCount++;
-
-      const action = existingEntry ? "Replaced" : "Added";
-      console.log(`✅ ${action}: ${relative(TEMP_DIR, filePath)} -> ${id}`);
     }
 
     // Generate embeddings only for entries that changed (different hash) or are new
@@ -348,21 +379,19 @@ async function main() {
         for (let i = 0; i < entriesNeedingEmbeddings.length; i += BATCH_SIZE) {
           const batch = entriesNeedingEmbeddings.slice(i, i + BATCH_SIZE);
           const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-          const textsToEmbed = batch.map((entry) => entry.content);
+          const textsToEmbed = batch.map((entry) => entry.chunk);
 
           console.log(
             `  Processing batch ${batchNumber}/${totalBatches} (${batch.length} entries)...`
           );
 
-          const { embeddings, usage } = await embedMany({
+          const { embeddings } = await embedMany({
             model: embeddingModel,
             values: textsToEmbed,
             maxRetries: 0,
           });
 
-          // eslint-disable-next-line no-console
-          console.log(`  💸 Usage => `, JSON.stringify(usage, null, 2), "\n");
-          // Don't make the call for testing
+          // DEBUG: Don't make the call for testing
           // const embeddings = batch.map(() => [1, 2, 3, 4, 5]);
 
           // Assign embeddings to entries in this batch
@@ -397,10 +426,12 @@ async function main() {
       "utf-8"
     );
 
-    console.log(`\n✨ Successfully processed ${processedCount} files`);
+    console.log(
+      `\n✨ Successfully processed ${processedCount} chunks of ${markdownFiles.length} files`
+    );
     console.log(`   📥 Added: ${addedCount}`);
     console.log(`   🔄 Replaced: ${replacedCount}`);
-    console.log(`   ⏭️  Skipped: ${skippedCount}`);
+    console.log(`   ⏭️ Skipped: ${skippedCount}`);
     console.log(`📁 Output file: ${OUTPUT_FILE}`);
     console.log(`📊 Total entries: ${allEntriesArray.length}`);
 

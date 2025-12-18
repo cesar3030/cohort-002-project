@@ -31,7 +31,7 @@ export const searchTool = tool({
 
     return {
       documents: results.map(({ doc }) => ({
-        content: doc.content,
+        content: doc.chunk,
         teamOwner: doc.team,
         name: doc.filename,
       })),

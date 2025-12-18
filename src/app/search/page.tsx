@@ -6,10 +6,9 @@ import { PerPageSelector } from "./per-page-selector";
 import { loadChats, loadMemories } from "@/lib/persistence-layer";
 import { CHAT_LIMIT } from "../page";
 import { SideBar } from "@/components/side-bar";
-import { EngDocList, type EngDocDisplay } from "./docs-list";
-import { searchWithBM25 } from "../lib/search-bm25";
+import { EngDocList } from "./docs-list";
 import { loadDocs } from "../lib/eng-doc-repository";
-import { searchWithEmbeddings } from "../lib/search-embbedings";
+
 import { searchWithRRF } from "../lib/search-rrf";
 
 export default async function SearchPage(props: {
@@ -22,24 +21,20 @@ export default async function SearchPage(props: {
 
   const allDocs = await loadDocs();
 
-  // Filter emails based on search query
-
   const keywords = query.length > 0 ? query.split(" ") : undefined; // should generate a list of keyword from an llm call
   const filteredDocs = await searchWithRRF(allDocs, query, keywords);
 
-  // eslint-disable-next-line no-console
-  // console.log(`\n\nfilteredDocs => `, filteredDocs.splice(0, 4));
-  const transformedDocs = filteredDocs
-    .map(({ score, doc }) => ({
-      id: doc.id,
-      team: doc.team,
-      preview: doc.content.substring(0, 100) + "...",
-      content: doc.content,
-      importedAt: doc.importedAt,
-      filename: doc.filename,
-      score,
-    }))
-    .filter(({ score }) => score > 0.2 || score === -1);
+  const transformedDocs = filteredDocs.map(({ score, doc }) => ({
+    id: doc.id,
+    team: doc.team,
+    preview: doc.chunk.substring(0, 100) + "...",
+    chunk: doc.chunk,
+    importedAt: doc.importedAt,
+    filename: doc.filename,
+    chunkIndex: doc.chunkIndex,
+    totalChunks: doc.totalChunks,
+    score,
+  }));
 
   const totalPages = Math.ceil(transformedDocs.length / perPage);
   const startIndex = (page - 1) * perPage;
@@ -77,7 +72,7 @@ export default async function SearchPage(props: {
                       &rdquo;
                     </>
                   ) : (
-                    <>Found {filteredDocs.length} emails</>
+                    <>Found {filteredDocs.length} chunks</>
                   )}
                 </p>
               </div>

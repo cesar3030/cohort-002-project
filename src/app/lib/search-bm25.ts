@@ -1,12 +1,12 @@
 import BM25 from "okapibm25";
-import { EngDoc } from "./eng-doc-repository";
+import { EngDocChunk } from "./eng-doc-repository";
 
 export function searchWithBM25(
-  docs: EngDoc[],
+  docs: EngDocChunk[],
   keywords: string[]
 ): {
   score: number;
-  doc: EngDoc;
+  doc: EngDocChunk;
 }[] {
   if (keywords.length === 0) {
     return docs.map((doc) => ({
@@ -15,7 +15,7 @@ export function searchWithBM25(
     }));
   }
   const scores: number[] = (BM25 as any)(
-    docs.map((doc) => doc.content.toLowerCase()),
+    docs.map((doc) => doc.chunk.toLowerCase()),
     keywords.map((k) => k.toLowerCase())
   );
 

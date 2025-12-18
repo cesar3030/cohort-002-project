@@ -1,15 +1,15 @@
 import { google } from "@ai-sdk/google";
 import { cosineSimilarity, embed } from "ai";
-import { EngDoc } from "./eng-doc-repository";
+import { EngDocChunk } from "./eng-doc-repository";
 import { getCache, generateCacheKey } from "./cache";
 
 export async function searchWithEmbeddings(
-  docs: EngDoc[],
+  docs: EngDocChunk[],
   query: string
 ): Promise<
   {
     score: number;
-    doc: EngDoc;
+    doc: EngDocChunk;
   }[]
 > {
   if (!query) {
